@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Brick Game 9999 in 1</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;width:100%;height:100%;background:#1c1c24;font-family:"Courier New",monospace;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  body{display:flex;align-items:center;justify-content:center}
+  
+  .device{
+    background:linear-gradient(#f4c734,#d6a313);
+    border-radius:20px;
+    padding:10px 12px 14px;
+    box-shadow:0 10px 25px rgba(0,0,0,.6);
+    display:flex;flex-direction:column;align-items:center;gap:8px;
+    max-width:100%;max-height:100%;
+  }
+  .brand{font:bold 11px "Courier New",monospace;letter-spacing:2px;color:#7a1d1d;width:100%;display:flex;justify-content:space-between}
+  .bezel{background:#2a2a30;border-radius:8px;padding:8px;box-shadow:inset 0 2px 6px #000}
+  .lcd{background:#a9b58c;display:flex;gap:6px;padding:6px;border-radius:4px;box-shadow:inset 0 0 12px rgba(0,0,0,.4)}
+  canvas#c{display:block;border:2px solid #1b2412;background:#a9b58c;width:182px;height:280px}
+  
+  .panel{width:72px;color:#1b2412;font-weight:bold;font-size:10px;display:flex;flex-direction:column;gap:3px}
+  .panel .v{font-size:15px;text-align:right;letter-spacing:1px;margin-bottom:2px}
+  .panel #aux{display:flex;flex-direction:column;gap:2px}
+  .panel #mini{width:40px;height:40px;align-self:flex-end;border:1px solid rgba(27,36,18,0.3)}
+  .panel .hint{margin-top:auto;font-size:8px;font-weight:normal;line-height:1.2;opacity:.85}
+  
+  .pills{display:flex;gap:6px;align-items:center;justify-content:center;width:100%}
+  .pill{
+    border:0;border-radius:10px;padding:6px 10px;font:bold 10px "Courier New",monospace;color:#fff;background:#2b4fa8;
+    box-shadow:0 3px 0 #17306e;touch-action:none;
+  }
+  .pill.s{background:#444;box-shadow:0 3px 0 #222}
+  
+  .controls{display:flex;gap:16px;align-items:center;justify-content:center;width:100%;margin-top:4px}
+  .dpad{display:grid;grid-template-columns:repeat(3,40px);grid-template-rows:repeat(3,40px);gap:3px}
+  .round{
+    width:40px;height:40px;border-radius:50%;border:0;font-size:16px;color:#fff;padding:0;
+    background:radial-gradient(circle at 35% 30%,#ff6b5e,#c4231a);
+    box-shadow:0 4px 0 #7d120c;touch-action:none;
+  }
+  .round.big{
+    width:70px;height:70px;font:bold 11px "Courier New",monospace;
+    background:radial-gradient(circle at 35% 30%,#6c94ff,#2b4fa8);
+    box-shadow:0 4px 0 #17306e;
+  }
+  .up{grid-column:2;grid-row:1}.lf{grid-column:1;grid-row:2}.rt{grid-column:3;grid-row:2}.dn{grid-column:2;grid-row:3}
+  .pill:active,.round:active,.pill.down,.round.down{transform:translateY(2px);box-shadow:0 0 0 #000}
+</style>
+</head>
+<body>
+
+<div class="device">
+  <div class="brand"><span>BRICK GAME</span><span>9999-in-1</span></div>
+  <div class="bezel">
+    <div class="lcd">
+      <canvas id="c" width="260" height="400"></canvas>
+      <div class="panel">
+        <div>SKÓRE</div><div class="v" id="sc">0</div>
+        <div>REKORD</div><div class="v" id="hi">0</div>
+        <div>LEVEL</div><div class="v" id="lv">1</div>
+        <div id="aux" style="display:none"><div id="auxL">DALŠÍ</div><canvas id="mini" width="48" height="48"></canvas></div>
+        <div class="hint" id="hint"></div>
+      </div>
+    </div>
+  </div>
+  <div class="pills">
+    <button class="pill" id="bStart">START / PAUZA</button>
+    <button class="pill s" id="bSnd">ZVUK: ON</button>
+    <button class="pill s" id="bReset">RESET</button>
+  </div>
+  <div class="controls">
+    <div class="dpad">
+      <button class="round up" id="bUp">▲</button>
+      <button class="round lf" id="bL">◀</button>
+      <button class="round rt" id="bR">▶</button>
+      <button class="round dn" id="bDn">▼</button>
+    </div>
+    <button class="round big" id="bA">START</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var COLS = 13, ROWS = 20;
+  var BG = '#a9b58c', DARK = '#1b2412', GHOST = 'rgba(27,36,18,0.09)';
+
+  function $(id) { return document.getElementById(id); }
+  var cv = $('c'), ctx = cv.getContext('2d'), mini = $('mini'), mx = mini.getContext('2d');
+  var elSc = $('sc'), elHi = $('hi'), elLv = $('lv'), elAux = $('aux'), elAuxL = $('auxL'), elHint = $('hint'), elA = $('bA');
+
+  var mode = 'menu';
+  var sel = 0, startLvl = 1, G = null, newRec = false;
+  var score = 0, lives = 0, level = 1, crashT = 0, tAll = 0;
+  var held = {}, sound = true, actx = null, HI = {};
+
+  try {
+    HI = JSON.parse(localStorage.getItem('brickGameHi') || '{}') || {};
+    if (!HI.racer) {
+      var old = parseInt(localStorage.getItem('brickRacerHi') || '0', 10) || 0;
+      if (old) HI.racer = old;
+    }
+  } catch (e) { HI = {}; }
+  function saveHi() { try { localStorage.setItem('brickGameHi', JSON.stringify(HI)); } catch (e) {} }
+
+  function rnd(n) { return Math.floor(Math.random() * n); }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  /* Zvuk */
+  function ac() {
+    if (!actx) { var C = window.AudioContext || window.webkitAudioContext; if (C) actx = new C(); }
+    return actx;
+  }
+  function beep(freq, dur, type) {
+    if (!sound) return;
+    try {
+      var a = ac(); if (!a) return;
+      if (a.state === 'suspended') a.resume();
+      var o = a.createOscillator(), g = a.createGain();
+      o.type = type || 'square'; o.frequency.value = freq; g.gain.value = 0.04;
+      o.connect(g); g.connect(a.destination);
+      o.start(); o.stop(a.currentTime + dur);
+    } catch (e) {}
+  }
+  function tune(list) { list.forEach(function (n, i) { setTimeout(function () { beep(n[0], n[1]); }, i * 95); }); }
+
+  /* Kreslení */
+  function box(c, r, col) {
+    var x = c * 20, y = r * 20;
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 2;
+    ctx.strokeRect(x + 3, y + 3, 14, 14);
+    ctx.fillRect(x + 6, y + 6, 8, 8);
+  }
+  function lit(c, r) {
+    c = Math.floor(c); r = Math.floor(r);
+    if (c >= 0 && c < COLS && r >= 0 && r < ROWS) box(c, r, DARK);
+  }
+  function text(t, y, size, x) {
+    ctx.fillStyle = DARK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = 'bold ' + size + 'px "Courier New", monospace';
+    ctx.fillText(t, x || COLS * 10, y);
+  }
+  function plate(x, y, w, h) {
+    ctx.fillStyle = BG; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = DARK; ctx.lineWidth = 3; ctx.strokeRect(x, y, w, h);
+  }
+  function mbox(c, r, col) {
+    var x = c * 12, y = r * 12;
+    mx.strokeStyle = col; mx.fillStyle = col; mx.lineWidth = 1.5;
+    mx.strokeRect(x + 2, y + 2, 8, 8);
+    mx.fillRect(x + 4, y + 4, 4, 4);
+  }
+  function drawMini(cells) {
+    mx.clearRect(0, 0, 48, 48);
+    for (var r = 0; r < 4; r++) for (var c = 0; c < 4; c++) mbox(c, r, GHOST);
+    cells.forEach(function (q) { mbox(q[0], q[1], DARK); });
+  }
+
+  function setLevel(n) {
+    if (n > level) { level = n; tune([[1100, .08], [1400, .1]]); }
+  }
+  function die() {
+    mode = 'crash'; crashT = 0; held = {};
+    beep(140, .5, 'sawtooth');
+    newRec = score > 0 && score > (HI[G.id] || 0);
+    if (newRec) { HI[G.id] = score; saveHi(); }
+  }
+  function livesAux() {
+    var cells = [];
+    for (var i = 0; i < lives && i < 4; i++) cells.push([i, 1]);
+    return { label: 'ŽIVOTY', cells: cells };
+  }
+  var DIRS = { left: { x: -1, y: 0 }, right: { x: 1, y: 0 }, up: { x: 0, y: -1 }, down: { x: 0, y: 1 } };
+
+  /* 1) RACER */
+  function makeRacer() {
+    var LANES = [1, 5, 9], PY = ROWS - 4, CAR = [[0, 1, 0], [1, 1, 1], [0, 1, 0], [1, 0, 1]];
+    var p, en, acc, off, since, gap, free;
+    function cells(lane, y) {
+      var o = [];
+      for (var r = 0; r < 4; r++) for (var c = 0; c < 3; c++) if (CAR[r][c]) o.push([LANES[lane] + c, y + r]);
+      return o;
+    }
+    function collides() {
+      var mine = {};
+      cells(p, PY).forEach(function (q) { mine[q[0] + ',' + q[1]] = 1; });
+      for (var i = 0; i < en.length; i++) {
+        var cs = cells(en[i].lane, en[i].y);
+        for (var j = 0; j < cs.length; j++) if (mine[cs[j][0] + ',' + cs[j][1]]) return true;
+      }
+      return false;
+    }
+    function spawn() {
+      var lanes = [0, 1, 2];
+      if (score >= 3 && Math.random() < 0.35) {
+        var cand = lanes.filter(function (l) { return free === null || Math.abs(l - free) <= 1; });
+        var f = cand[rnd(cand.length)];
+        lanes.forEach(function (l) { if (l !== f) en.push({ lane: l, y: -4 }); });
+        free = f;
+      } else { en.push({ lane: rnd(3), y: -4 }); free = null; }
+      since = 0; gap = 9 + rnd(4);
+    }
+    function interval() {
+      var b = Math.max(65, 240 - (level - 1) * 20);
+      return (held.up || held.a) ? b / 3 : b;
+    }
+    function tick() {
+      off++;
+      for (var i = en.length - 1; i >= 0; i--) {
+        en[i].y++;
+        if (en[i].y >= ROWS) {
+          en.splice(i, 1); score++; beep(900, .04);
+          setLevel(startLvl + Math.floor(score / 10));
+        }
+      }
+      since++; if (since >= gap) spawn();
+      if (collides()) die();
+    }
+    return {
+      id: 'racer', name: 'RACER', aLabel: 'TURBO',
+      hint: '◀ ▶ řízení<br>▲ / A turbo',
+      init: function () { p = 1; en = []; acc = 0; off = 0; since = 8; gap = 9; free = null; },
+      update: function (dt) {
+        acc += dt; var iv;
+        while (mode === 'play' && acc >= (iv = interval())) { acc -= iv; tick(); }
+      },
+      key: function (b, rep) {
+        if (rep) return;
+        var d = b === 'left' ? -1 : b === 'right' ? 1 : 0;
+        if (!d) return;
+        var n = Math.max(0, Math.min(2, p + d));
+        if (n !== p) { p = n; beep(300, .03); if (collides()) die(); }
+      },
+      draw: function () {
+        for (var r = 0; r < ROWS; r++) if (((r + off) % 4 + 4) % 4 !== 3) { lit(0, r); lit(COLS - 1, r); }
+        en.forEach(function (e) { cells(e.lane, e.y).forEach(function (q) { lit(q[0], q[1]); }); });
+        cells(p, PY).forEach(function (q) { lit(q[0], q[1]); });
+      },
+      aux: function () { return null; }
+    };
+  }
+
+  /* 2) TETRIS */
+  function makeTetris() {
+    var W = 11, H = ROWS;
+    var SH = [
+      [[1, 1, 1, 1]], [[1, 1], [1, 1]], [[0, 1, 0], [1, 1, 1]], [[0, 1, 1], [1, 1, 0]],
+      [[1, 1, 0], [0, 1, 1]], [[1, 0, 0], [1, 1, 1]], [[0, 0, 1], [1, 1, 1]]
+    ];
+    var board, cur, nxt, bag, drop, lines;
+    function rot(m) {
+      var h = m.length, w = m[0].length, o = [];
+      for (var c = 0; c < w; c++) { o[c] = []; for (var r = h - 1; r >= 0; r--) o[c].push(m[r][c]); }
+      return o;
+    }
+    function takeBag() {
+      if (!bag.length) {
+        bag = [0, 1, 2, 3, 4, 5, 6];
+        for (var i = bag.length - 1; i > 0; i--) { var j = rnd(i + 1), t = bag[i]; bag[i] = bag[j]; bag[j] = t; }
+      }
+      return bag.pop();
+    }
+    function fits(m, x, y) {
+      for (var r = 0; r < m.length; r++) for (var c = 0; c < m[0].length; c++) if (m[r][c]) {
+        var X = x + c, Y = y + r;
+        if (X < 0 || X >= W || Y >= H) return false;
+        if (Y >= 0 && board[Y][X]) return false;
+      }
+      return true;
+    }
+    function spawn() {
+      var m = SH[nxt].map(function (r) { return r.slice(); });
+      cur = { m: m, x: Math.floor((W - m[0].length) / 2), y: 0 };
+      nxt = takeBag();
+      if (!fits(cur.m, cur.x, cur.y)) die();
+    }
+    function lock() {
+      cur.m.forEach(function (row, r) { row.forEach(function (v, c) { if (v && cur.y + r >= 0) board[cur.y + r][cur.x + c] = 1; }); });
+      var n = 0;
+      for (var r = H - 1; r >= 0; r--) {
+        if (board[r].every(function (v) { return v; })) {
+          board.splice(r, 1);
+          board.unshift(new Array(W).fill(0));
+          n++; r++;
+        }
+      }
+      if (n) {
+        score += [0, 100, 300, 500, 800][n]; lines += n;
+        tune(n === 4 ? [[800, .06], [1000, .06], [1300, .1]] : [[700, .05], [900, .06]]);
+        setLevel(startLvl + Math.floor(lines / 10));
+      } else beep(220, .04);
+      spawn();
+    }
+    function step() { if (fits(cur.m, cur.x, cur.y + 1)) cur.y++; else lock(); }
+    return {
+      id: 'tetris', name: 'TETRIS', aLabel: 'OTOČ',
+      hint: '◀ ▶ posun<br>▲ / A otočit<br>▼ dolů',
+      init: function () {
+        board = []; for (var r = 0; r < H; r++) board.push(new Array(W).fill(0));
+        bag = []; lines = 0; drop = 0; nxt = takeBag(); spawn();
+      },
+      update: function (dt) {
+        drop += dt;
+        var iv = Math.max(70, 720 - (level - 1) * 75);
+        while (mode === 'play' && drop >= iv) { drop -= iv; step(); }
+      },
+      key: function (b, rep) {
+        if (b === 'left' && fits(cur.m, cur.x - 1, cur.y)) { cur.x--; beep(260, .02); }
+        else if (b === 'right' && fits(cur.m, cur.x + 1, cur.y)) { cur.x++; beep(260, .02); }
+        else if (b === 'down') {
+          if (fits(cur.m, cur.x, cur.y + 1)) { cur.y++; score++; drop = 0; } else step();
+        }
+        else if ((b === 'up' || b === 'a') && !rep) {
+          var r = rot(cur.m), ks = [0, -1, 1, -2, 2];
+          for (var i = 0; i < ks.length; i++) if (fits(r, cur.x + ks[i], cur.y)) { cur.m = r; cur.x += ks[i]; beep(480, .03); break; }
+        }
+      },
+      draw: function () {
+        for (var r = 0; r < ROWS; r++) { lit(0, r); lit(COLS - 1, r); }
+        for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) if (board[y][x]) lit(x + 1, y);
+        cur.m.forEach(function (row, rr) { row.forEach(function (v, c) { if (v) lit(cur.x + c + 1, cur.y + rr); }); });
+      },
+      aux: function () {
+        var m = SH[nxt], cells = [], oy = Math.floor((4 - m.length) / 2), ox = Math.floor((4 - m[0].length) / 2);
+        m.forEach(function (row, r) { row.forEach(function (v, c) { if (v) cells.push([ox + c, oy + r]); }); });
+        return { label: 'DALŠÍ', cells: cells };
+      }
+    };
+  }
+
+  /* 3) BREAKOUT */
+  function makeBreakout() {
+    var PR = ROWS - 2, br, left, px, bx, by, bvx, bvy, launched, wait;
+    function wall() {
+      br = []; left = 0;
+      for (var r = 0; r < ROWS; r++) {
+        br[r] = [];
+        for (var c = 0; c < COLS; c++) { var v = (r >= 1 && r <= 5) ? 1 : 0; br[r][c] = v; left += v; }
+      }
+    }
+    function spd() { return 7 + 0.9 * level; }
+    function attach() { launched = false; wait = 0; bx = px + 1.5; by = PR - 0.5; bvx = 0; bvy = 0; }
+    function launch() {
+      if (launched) return;
+      launched = true;
+      var a = (Math.random() - 0.5) * 0.9, s = spd();
+      bvx = s * Math.sin(a); bvy = -s * Math.cos(a); beep(500, .05);
+    }
+    function miss() {
+      lives--; beep(160, .4, 'sawtooth');
+      if (lives <= 0) die(); else attach();
+    }
+    function advance(dt) {
+      var dist = Math.sqrt(bvx * bvx + bvy * bvy) * dt / 1000;
+      var n = Math.max(1, Math.ceil(dist / 0.2)), h = dt / 1000 / n;
+      for (var i = 0; i < n; i++) {
+        var nx = bx + bvx * h, ny = by + bvy * h;
+        if (nx < 0) { nx = 0.001; bvx = Math.abs(bvx); }
+        else if (nx >= COLS) { nx = COLS - 0.001; bvx = -Math.abs(bvx); }
+        if (ny < 0) { ny = 0.001; bvy = Math.abs(bvy); }
+        var fx = Math.floor(bx), fy = Math.floor(by), gx = Math.floor(nx), gy = Math.floor(ny);
+        if (gy >= 0 && gy < ROWS && br[gy][gx]) {
+          var hh = gx !== fx, hv = gy !== fy;
+          if (hh && hv) {
+            var bH = br[fy][gx], bV = br[gy][fx];
+            if (bH && !bV) bvx = -bvx; else if (bV && !bH) bvy = -bvy; else { bvx = -bvx; bvy = -bvy; }
+          } else if (hh) bvx = -bvx; else bvy = -bvy;
+          br[gy][gx] = 0; left--; score += 10; beep(650 + (5 - gy) * 60, .03);
+          if (left <= 0) {
+            score += 50; setLevel(level + 1); wall(); attach();
+            tune([[900, .06], [1200, .06], [1500, .1]]);
+            return;
+          }
+          continue;
+        }
+        if (bvy > 0 && gy >= PR && fy < PR && nx >= px - 0.25 && nx <= px + 3.25) {
+          var a = Math.max(-1.05, Math.min(1.05, (nx - (px + 1.5)) / 1.6)), sp = spd();
+          bvx = sp * Math.sin(a); bvy = -sp * Math.cos(a); ny = PR - 0.001; beep(400, .03);
+        }
+        if (ny >= ROWS) { miss(); return; }
+        bx = nx; by = ny;
+      }
+    }
+    return {
+      id: 'breakout', name: 'BREAKOUT', aLabel: 'START', lives: 3,
+      hint: '◀ ▶ pálka<br>▲ / A vypustit',
+      init: function () { px = 5; wall(); attach(); },
+      update: function (dt) {
+        if (!launched) { wait += dt; if (wait > 1600) launch(); return; }
+        advance(dt);
+      },
+      key: function (b) {
+        if (b === 'left') { px = Math.max(0, px - 1); if (!launched) bx = px + 1.5; }
+        else if (b === 'right') { px = Math.min(COLS - 3, px + 1); if (!launched) bx = px + 1.5; }
+        else if (b === 'a' || b === 'up') launch();
+      },
+      draw: function () {
+        for (var r = 1; r <= 5; r++) for (var c = 0; c < COLS; c++) if (br[r][c]) lit(c, r);
+        for (var i = 0; i < 3; i++) lit(px + i, PR);
+        if (launched || Math.floor(tAll / 150) % 2 === 0) lit(bx, by);
+      },
+      aux: livesAux
+    };
+  }
+
+  /* 4) SNAKE */
+  function makeSnake() {
+    var body, dir, q, food, acc, eaten;
+    function inBody(x, y) { return body.some(function (s) { return s.x === x && s.y === y; }); }
+    function place() {
+      do { food = { x: 1 + rnd(11), y: 1 + rnd(18) }; } while (inBody(food.x, food.y));
+    }
+    function step() {
+      if (q.length) dir = q.shift();
+      var hd = body[0], nx = hd.x + dir.x, ny = hd.y + dir.y;
+      if (nx < 1 || nx > 11 || ny < 1 || ny > 18) { die(); return; }
+      var ate = nx === food.x && ny === food.y;
+      var upto = ate ? body.length : body.length - 1;
+      for (var i = 0; i < upto; i++) if (body[i].x === nx && body[i].y === ny) { die(); return; }
+      body.unshift({ x: nx, y: ny });
+      if (ate) {
+        score += 10; eaten++; beep(880, .05); place();
+        setLevel(startLvl + Math.floor(eaten / 5));
+      } else body.pop();
+    }
+    return {
+      id: 'snake', name: 'SNAKE', aLabel: 'TURBO',
+      hint: '◀ ▲ ▼ ▶ směr<br>A zrychlit',
+      init: function () {
+        body = [{ x: 6, y: 11 }, { x: 6, y: 12 }, { x: 6, y: 13 }];
+        dir = { x: 0, y: -1 }; q = []; acc = 0; eaten = 0; place();
+      },
+      update: function (dt) {
+        acc += dt;
+        var iv = Math.max(60, 280 - (level - 1) * 28) / (held.a ? 2 : 1);
+        while (mode === 'play' && acc >= iv) { acc -= iv; step(); }
+      },
+      key: function (b) {
+        var d = DIRS[b]; if (!d) return;
+        var last = q.length ? q[q.length - 1] : dir;
+        if ((d.x === -last.x && d.y === -last.y) || (d.x === last.x && d.y === last.y)) return;
+        if (q.length < 3) q.push(d);
+      },
+      draw: function () {
+        var c, r;
+        for (c = 0; c < COLS; c++) { lit(c, 0); lit(c, ROWS - 1); }
+        for (r = 0; r < ROWS; r++) { lit(0, r); lit(COLS - 1, r); }
+        body.forEach(function (s) { lit(s.x, s.y); });
+        if (Math.floor(tAll / 180) % 2 === 0) lit(food.x, food.y);
+      },
+      aux: function () { return null; }
+    };
+  }
+
+  /* 5) STŘÍLEČKA */
+  function makeShooter() {
+    var SY = 18, cx, bul, en, stAcc, spAcc, bAcc, cool, blink;
+    function shipCells() { return [[cx, SY], [cx - 1, SY + 1], [cx, SY + 1], [cx + 1, SY + 1]]; }
+    function hits() {
+      for (var i = bul.length - 1; i >= 0; i--) {
+        for (var j = en.length - 1; j >= 0; j--) {
+          if (bul[i] && bul[i].x === en[j].x && bul[i].y === en[j].y) {
+            bul.splice(i, 1); en.splice(j, 1);
+            score += 10; beep(1000, .04); setLevel(startLvl + Math.floor(score / 100));
+            break;
+          }
+        }
+      }
+    }
+    function shipHit() {
+      var s = shipCells();
+      for (var i = 0; i < en.length; i++) for (var j = 0; j < s.length; j++) if (en[i].x === s[j][0] && en[i].y === s[j][1]) return true;
+      return false;
+    }
+    function lost() {
+      lives--; en = []; bul = []; beep(150, .4, 'sawtooth');
+      if (lives <= 0) die(); else blink = 1000;
+    }
+    function fire() {
+      if (cool > 0 || blink > 0 || bul.length >= 6) return;
+      bul.push({ x: cx, y: SY - 1 }); cool = 150; beep(1300, .025); hits();
+    }
+    function spawn() {
+      var x = rnd(COLS); en.push({ x: x, y: 0 });
+      if (Math.random() < Math.min(0.5, 0.1 + level * 0.05)) { var x2 = rnd(COLS); if (x2 !== x) en.push({ x: x2, y: 0 }); }
+      hits();
+    }
+    return {
+      id: 'shooter', name: 'GALAXY', aLabel: 'PALBA', lives: 3,
+      hint: '◀ ▶ pohyb<br>A / ▲ střelba',
+      init: function () { cx = 6; bul = []; en = []; stAcc = 0; spAcc = 0; bAcc = 0; cool = 0; blink = 0; },
+      update: function (dt) {
+        if (blink > 0) { blink -= dt; return; }
+        cool -= dt;
+        if (held.a || held.up) fire();
+        bAcc += dt;
+        while (bAcc >= 50) {
+          bAcc -= 50;
+          bul.forEach(function (b) { b.y--; });
+          bul = bul.filter(function (b) { return b.y >= 0; });
+          hits();
+        }
+        stAcc += dt;
+        var si = Math.max(110, 480 - (level - 1) * 45);
+        while (stAcc >= si) {
+          stAcc -= si;
+          en.forEach(function (e) { e.y++; });
+          hits();
+          var gone = false;
+          for (var i = en.length - 1; i >= 0; i--) if (en[i].y >= ROWS) { en.splice(i, 1); gone = true; }
+          if (shipHit() || gone) { lost(); return; }
+        }
+        spAcc += dt;
+        var pi = Math.max(260, 900 - (level - 1) * 70);
+        if (spAcc >= pi) { spAcc -= pi; spawn(); }
+      },
+      key: function (b) {
+        if (b === 'left') cx = Math.max(0, cx - 1);
+        else if (b === 'right') cx = Math.min(COLS - 1, cx + 1);
+        else if (b === 'a' || b === 'up') fire();
+      },
+      draw: function () {
+        if (!(blink > 0 && Math.floor(blink / 110) % 2)) shipCells().forEach(function (q) { lit(q[0], q[1]); });
+        en.forEach(function (e) { lit(e.x, e.y); });
+        bul.forEach(function (b) { lit(b.x, b.y); });
+      },
+      aux: livesAux
+    };
+  }
+
+  /* 6) FROGGER */
+  function makeFrog() {
+    var LR = [1, 2, 4, 5, 7, 8, 10, 11, 13, 14, 16, 17];
+    var fx, fy, lanes, byRow, crossed, blink;
+    function build() {
+      byRow = {};
+      lanes = LR.map(function (r) {
+        var cells = [], i; for (i = 0; i < COLS; i++) cells.push(0);
+        var s = rnd(COLS), p = s;
+        while (p + 5 <= s + COLS) { cells[p % COLS] = 1; cells[(p + 1) % COLS] = 1; p += 5 + rnd(3); }
+        var l = { r: r, cells: cells, dir: (r % 2) ? 1 : -1, base: 420 + ((r * 53) % 7) * 45, t: Math.random() * 300 };
+        byRow[r] = l; return l;
+      });
+    }
+    function reset() { fx = 6; fy = 19; }
+    function hit() {
+      lives--; beep(150, .4, 'sawtooth');
+      if (lives <= 0) die(); else blink = 900;
+    }
+    function check() { var l = byRow[fy]; if (l && l.cells[fx]) { hit(); return true; } return false; }
+    function success() {
+      crossed++; score += 10; setLevel(startLvl + Math.floor(crossed / 2));
+      tune([[880, .06], [1100, .06], [1320, .1]]);
+      build(); reset();
+    }
+    return {
+      id: 'frog', name: 'FROGGER', aLabel: 'SKOK', lives: 3,
+      hint: '◀ ▲ ▼ ▶ skok<br>A skok vpřed',
+      init: function () { crossed = 0; blink = 0; build(); reset(); },
+      update: function (dt) {
+        if (blink > 0) { blink -= dt; if (blink <= 0) reset(); return; }
+        for (var i = 0; i < lanes.length; i++) {
+          var l = lanes[i];
+          l.t += dt;
+          var iv = Math.max(110, l.base * Math.pow(0.88, level - 1));
+          while (l.t >= iv) {
+            l.t -= iv;
+            if (l.dir > 0) l.cells.unshift(l.cells.pop()); else l.cells.push(l.cells.shift());
+            if (l.r === fy && l.cells[fx]) { hit(); return; }
+          }
+        }
+      },
+      key: function (b) {
+        if (blink > 0) return;
+        if (b === 'left') fx = Math.max(0, fx - 1);
+        else if (b === 'right') fx = Math.min(COLS - 1, fx + 1);
+        else if (b === 'up' || b === 'a') fy--;
+        else if (b === 'down') fy = Math.min(19, fy + 1);
+        else return;
+        beep(350, .02);
+        if (fy <= 0) { success(); return; }
+        check();
+      },
+      draw: function () {
+        var c;
+        for (c = 0; c < COLS; c += 2) lit(c, 0);
+        lanes.forEach(function (l) { l.cells.forEach(function (v, x) { if (v) lit(x, l.r); }); });
+        if (Math.floor(tAll / (blink > 0 ? 90 : 220)) % 2 === 0) lit(fx, fy);
+      },
+      aux: livesAux
+    };
+  }
+
+  function ring(c, r) {
+    ctx.strokeStyle = DARK; ctx.lineWidth = 2;
+    ctx.strokeRect(c * 20 + 3, r * 20 + 3, 14, 14);
+  }
+  function dot(c, r, big) {
+    ctx.fillStyle = DARK;
+    var s = big ? 10 : 4, o = (20 - s) / 2;
+    ctx.fillRect(c * 20 + o, r * 20 + o, s, s);
+  }
+
+  /* 7) PONG */
+  function makePong() {
+    var PR = ROWS - 2, CRW = 1, px, cx, bx, by, bvx, bvy, wait, live, cacc, off;
+    function spd() { return 6.5 + 0.8 * level; }
+    function newOff() { var g = level < 3 ? 2 : 1; return rnd(2 * g + 1) - g; }
+    function serve() { bx = 6.5; by = 10.5; bvx = 0; bvy = 0; wait = 1000; live = false; off = newOff(); }
+    function launch() {
+      var a = (Math.random() - 0.5) * 0.9, s = spd();
+      bvx = s * Math.sin(a); bvy = s * Math.cos(a); live = true; beep(500, .05);
+    }
+    function angle(nx, p) { return Math.max(-1.05, Math.min(1.05, (nx - (p + 1.5)) / 1.6)); }
+    function advance(dt) {
+      var dist = Math.sqrt(bvx * bvx + bvy * bvy) * dt / 1000;
+      var n = Math.max(1, Math.ceil(dist / 0.2)), h = dt / 1000 / n;
+      for (var i = 0; i < n; i++) {
+        var nx = bx + bvx * h, ny = by + bvy * h;
+        if (nx < 0) { nx = 0.001; bvx = Math.abs(bvx); }
+        else if (nx >= COLS) { nx = COLS - 0.001; bvx = -Math.abs(bvx); }
+        if (ny < 0) {
+          score += 10; setLevel(startLvl + Math.floor(score / 50));
+          tune([[900, .06], [1200, .08]]); serve(); return;
+        }
+        var fy = Math.floor(by), gy = Math.floor(ny), sp = spd(), a;
+        if (bvy > 0 && gy >= PR && fy < PR && nx >= px - 0.25 && nx <= px + 3.25) {
+          a = angle(nx, px); bvx = sp * Math.sin(a); bvy = -sp * Math.cos(a); ny = PR - 0.001; beep(400, .03);
+        } else if (bvy < 0 && gy <= CRW && fy > CRW && nx >= cx - 0.25 && nx <= cx + 3.25) {
+          a = angle(nx, cx); bvx = sp * Math.sin(a); bvy = sp * Math.cos(a); ny = CRW + 1.001; off = newOff(); beep(330, .03);
+        }
+        if (ny >= ROWS) {
+          lives--; beep(160, .4, 'sawtooth');
+          if (lives <= 0) die(); else serve();
+          return;
+        }
+        bx = nx; by = ny;
+      }
+    }
+    return {
+      id: 'pong', name: 'PONG', aLabel: 'START', lives: 3,
+      hint: '◀ ▶ pálka',
+      init: function () { px = 5; cx = 5; cacc = 0; serve(); },
+      update: function (dt) {
+        cacc += dt;
+        var iv = Math.max(70, 190 - (level - 1) * 14);
+        while (cacc >= iv) {
+          cacc -= iv;
+          var t = (live && bvy < 0) ? Math.round(bx - 1.5 + off) : 5;
+          t = Math.max(0, Math.min(COLS - 3, t));
+          if (cx < t) cx++; else if (cx > t) cx--;
+        }
+        if (!live) { wait -= dt; if (wait <= 0) launch(); return; }
+        advance(dt);
+      },
+      key: function (b) {
+        if (b === 'left') px = Math.max(0, px - 1);
+        else if (b === 'right') px = Math.min(COLS - 3, px + 1);
+      },
+      draw: function () {
+        for (var i = 0; i < 3; i++) { lit(px + i, PR); lit(cx + i, CRW); }
+        if (live || Math.floor(tAll / 150) % 2 === 0) lit(bx, by);
+      },
+      aux: livesAux
+    };
+  }
+
+  /* 8) PAC-MAN */
+  function makePac() {
+    var CR = [1, 4, 7, 10, 13, 16, 18], CC = [1, 4, 8, 11];
+    var D4 = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
+    var MAP, pel, left, px, py, dir, want, pacAcc, gAcc, gh, fright, blink;
+    function build() {
+      var r, c;
+      MAP = []; pel = []; left = 0;
+      for (r = 0; r < ROWS; r++) {
+        MAP[r] = []; pel[r] = [];
+        for (c = 0; c < COLS; c++) {
+          var border = r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1;
+          MAP[r][c] = border ? true : (CR.indexOf(r) < 0 && CC.indexOf(c) < 0);
+          pel[r][c] = 0;
+        }
+      }
+      MAP[10][0] = false; MAP[10][COLS - 1] = false;
+      for (r = 8; r <= 9; r++) for (c = 5; c <= 7; c++) MAP[r][c] = false;
+      for (r = 0; r < ROWS; r++) for (c = 0; c < COLS; c++) {
+        var house = r >= 8 && r <= 9 && c >= 5 && c <= 7;
+        var tun = r === 10 && (c === 0 || c === COLS - 1);
+        if (!MAP[r][c] && !house && !tun && !(r === 16 && c === 6)) { pel[r][c] = 1; left++; }
+      }
+      [[1, 1], [1, 11], [16, 1], [16, 11]].forEach(function (p) { pel[p[0]][p[1]] = 2; });
+    }
+    function open(x, y) { x = (x + COLS) % COLS; return y >= 0 && y < ROWS && !MAP[y][x]; }
+    function resetPos() {
+      px = 6; py = 16; dir = null; want = null; pacAcc = 0; gAcc = 0; fright = 0;
+      gh = [{ x: 5, y: 8, sk: 0.9 }, { x: 7, y: 8, sk: 0.7 }, { x: 6, y: 9, sk: 0.5 }].map(function (g, i) {
+        g.d = { x: 0, y: -1 }; g.home = 800 + i * 1500; return g;
+      });
+    }
+    function lost() {
+      lives--; beep(150, .4, 'sawtooth');
+      if (lives <= 0) die(); else blink = 1100;
+    }
+    function hitCheck() {
+      for (var i = 0; i < gh.length; i++) {
+        var g = gh[i];
+        if (g.home > 0 || g.x !== px || g.y !== py) continue;
+        if (fright > 0) { score += 100; g.x = 6; g.y = 9; g.home = 2500; beep(1100, .08); }
+        else { lost(); return true; }
+      }
+      return false;
+    }
+    function eat() {
+      var v = pel[py][px];
+      if (!v) return;
+      pel[py][px] = 0; left--;
+      if (v === 2) {
+        score += 50; fright = Math.max(2500, 6000 - (level - 1) * 400);
+        gh.forEach(function (g) { g.d = { x: -g.d.x, y: -g.d.y }; });
+        beep(300, .1);
+      } else { score += 10; beep(500, .015); }
+      if (left <= 0) {
+        score += 100; setLevel(level + 1); build(); resetPos();
+        tune([[900, .06], [1200, .06], [1500, .1]]);
+      }
+    }
+    function pacTick() {
+      if (want && open(px + want.x, py + want.y)) dir = want;
+      if (dir && open(px + dir.x, py + dir.y)) {
+        px = (px + dir.x + COLS) % COLS; py += dir.y;
+        if (hitCheck()) return;
+        eat();
+      }
+    }
+    function ghostTick() {
+      gh.forEach(function (g) {
+        if (g.home > 0) return;
+        var opts = D4.filter(function (d) { return !(d.x === -g.d.x && d.y === -g.d.y) && open(g.x + d.x, g.y + d.y); });
+        if (!opts.length) opts = D4.filter(function (d) { return open(g.x + d.x, g.y + d.y); });
+        if (!opts.length) return;
+        var pick;
+        if (fright > 0 || Math.random() > g.sk) pick = opts[rnd(opts.length)];
+        else {
+          pick = opts[0]; var best = 1e9;
+          opts.forEach(function (d) {
+            var dd = Math.abs(g.x + d.x - px) + Math.abs(g.y + d.y - py);
+            if (dd < best) { best = dd; pick = d; }
+          });
+        }
+        g.d = pick; g.x = (g.x + pick.x + COLS) % COLS; g.y += pick.y;
+      });
+    }
+    return {
+      id: 'pac', name: 'PAC-MAN', aLabel: 'STOP', lives: 3,
+      hint: '◀ ▲ ▼ ▶ směr<br>A stop',
+      init: function () { blink = 0; build(); resetPos(); },
+      update: function (dt) {
+        if (blink > 0) { blink -= dt; if (blink <= 0) resetPos(); return; }
+        if (fright > 0) fright = Math.max(0, fright - dt);
+        gh.forEach(function (g) { if (g.home > 0) g.home -= dt; });
+        pacAcc += dt; gAcc += dt;
+        var pi = Math.max(85, 220 - (level - 1) * 12);
+        var gi = Math.max(100, 260 - (level - 1) * 14) * (fright > 0 ? 1.5 : 1);
+        while (mode === 'play' && blink <= 0 && pacAcc >= pi) { pacAcc -= pi; pacTick(); }
+        while (mode === 'play' && blink <= 0 && gAcc >= gi) { gAcc -= gi; ghostTick(); hitCheck(); }
+      },
+      key: function (b) {
+        if (DIRS[b]) want = DIRS[b];
+        else if (b === 'a') { dir = null; want = null; }
+      },
+      draw: function () {
+        var r, c;
+        for (r = 0; r < ROWS; r++) for (c = 0; c < COLS; c++) {
+          if (MAP[r][c]) ring(c, r);
+          else if (pel[r][c] === 1) dot(c, r, false);
+          else if (pel[r][c] === 2 && Math.floor(tAll / 250) % 2 === 0) dot(c, r, true);
+        }
+        if (blink > 0 ? Math.floor(blink / 110) % 2 === 0 : true) lit(px, py);
+        var per = fright > 0 ? (fright < 2000 ? 100 : 300) : 130;
+        if (Math.floor(tAll / per) % 2 === 0) gh.forEach(function (g) { lit(g.x, g.y); });
+      },
+      aux: livesAux
+    };
+  }
+
+  /* 9) SNĚH */
+  function makeSnow() {
+    var px, py, fl, acc, tk;
+    function hit() { return fl.some(function (f) { return f.x === px && f.y === py; }); }
+    function step() {
+      tk++;
+      fl.forEach(function (f) { if (!(f.slow && tk % 2)) f.y++; });
+      fl = fl.filter(function (f) {
+        if (f.y >= ROWS) { score++; setLevel(startLvl + Math.floor(score / 15)); return false; }
+        return true;
+      });
+      if (Math.random() < Math.min(0.75, 0.35 + level * 0.04)) fl.push({ x: rnd(COLS), y: 0, slow: Math.random() < 0.3 });
+      if (level > 4 && Math.random() < 0.3) fl.push({ x: rnd(COLS), y: 0, slow: false });
+      if (hit()) die();
+    }
+    return {
+      id: 'snow', name: 'SNĚH', aLabel: 'PULSE',
+      hint: '◀ ▲ ▼ ▶ pohyb',
+      init: function () { px = 6; py = 17; fl = []; acc = 0; tk = 0; },
+      update: function (dt) {
+        acc += dt;
+        var iv = Math.max(80, 250 - (level - 1) * 20);
+        while (mode === 'play' && acc >= iv) { acc -= iv; step(); }
+      },
+      key: function (b) {
+        var d = DIRS[b]; if (!d) return;
+        px = Math.max(0, Math.min(COLS - 1, px + d.x));
+        py = Math.max(0, Math.min(ROWS - 1, py + d.y));
+        if (hit()) die();
+      },
+      draw: function () {
+        fl.forEach(function (f) { lit(f.x, f.y); });
+        if (Math.floor(tAll / 150) % 2 === 0) lit(px, py);
+      },
+      aux: function () { return null; }
+    };
+  }
+
+  /* 10) STACKER */
+  function makeStacker() {
+    var st, bx, bw, dx, acc;
+    function shift() { return Math.max(0, st.length - 12); }
+    function drop() {
+      var top = st[st.length - 1];
+      var lo = Math.max(bx, top.x), hi = Math.min(bx + bw, top.x + top.w), ow = hi - lo;
+      if (ow <= 0) { die(); return; }
+      var perfect = ow === bw;
+      st.push({ x: lo, w: ow }); bw = ow;
+      score += perfect ? 20 : 10;
+      tune(perfect ? [[900, .05], [1200, .06]] : [[500, .05]]);
+      setLevel(startLvl + Math.floor((st.length - 1) / 10));
+    }
+    return {
+      id: 'stacker', name: 'STACKER', aLabel: 'POLOŽ',
+      hint: 'A položit patro',
+      init: function () { st = [{ x: 4, w: 5 }]; bw = 5; bx = 0; dx = 1; acc = 0; },
+      update: function (dt) {
+        acc += dt;
+        var iv = Math.max(40, 170 - (level - 1) * 14 - Math.min(60, st.length * 2));
+        while (mode === 'play' && acc >= iv) {
+          acc -= iv;
+          var nx = bx + dx;
+          if (nx < 0 || nx + bw > COLS) { dx = -dx; nx = bx + dx; }
+          bx = nx;
+        }
+      },
+      key: function (b, rep) {
+        if (rep) return;
+        if (b === 'a' || b === 'up' || b === 'down') drop();
+      },
+      draw: function () {
+        var s = shift(), i, c, y;
+        for (i = 0; i < st.length; i++) {
+          y = ROWS - 1 - i + s;
+          if (y >= 0 && y < ROWS) for (c = 0; c < st[i].w; c++) lit(st[i].x + c, y);
+        }
+        y = ROWS - 1 - st.length + s;
+        for (c = 0; c < bw; c++) lit(bx + c, y);
+      },
+      aux: function () { return null; }
+    };
+  }
+
+  var GAMES = [makeRacer(), makeTetris(), makeBreakout(), makeSnake(), makeShooter(), makeFrog(),
+               makePong(), makePac(), makeSnow(), makeStacker()];
+
+  var ICONS = {
+    racer:    ['#...#...#', '#..###..#', '#...#...#', '#..#.#..#', '#.......#', '.........'],
+    tetris:   ['..##.....', '...##....', '.........', '#.#..#.##', '######.##', '#######.#'],
+    breakout: ['#########', '#.#.#.#.#', '#########', '....#....', '.........', '...###...'],
+    snake:    ['#####....', '....#....', '..###..#.', '..#......', '..#####..', '.........'],
+    shooter:  ['#.#.#.#.#', '.#.#.#.#.', '....#....', '.........', '....#....', '...###...'],
+    frog:     ['..##...##', '.........', '##...##..', '.........', '....#....', '.........'],
+    pong:     ['...###...', '.........', '......#..', '.........', '.........', '...###...'],
+    pac:      ['#########', '#..#.#..#', '#.#...#.#', '#...#...#', '#.#...#.#', '#########'],
+    snow:     ['..#...#..', '.....#...', '#....#..#', '.#.......', '.....#...', '....#....'],
+    stacker:  ['..##.....', '.........', '.#####...', '.######..', '########.', '#########']
+  };
+
+  function startGame() {
+    G = GAMES[sel]; score = 0; level = startLvl; lives = G.lives || 0; newRec = false; held = {};
+    G.init(); mode = 'play';
+    tune([[660, .08], [880, .1]]);
+  }
+  function toMenu() { mode = 'menu'; G = null; held = {}; }
+  function startPause() {
+    if (mode === 'menu' || mode === 'over') startGame();
+    else if (mode === 'play') { mode = 'pause'; held = {}; }
+    else if (mode === 'pause') mode = 'play';
+  }
+  function toggleSound() {
+    sound = !sound;
+    $('bSnd').textContent = 'ZVUK: ' + (sound ? 'ON' : 'OFF');
+  }
+  function menuKey(b, rep) {
+    var n = GAMES.length;
+    if (b === 'left') { sel = (sel + n - 1) % n; beep(500, .04); }
+    else if (b === 'right') { sel = (sel + 1) % n; beep(500, .04); }
+    else if (b === 'up') { startLvl = Math.min(9, startLvl + 1); beep(700, .03); }
+    else if (b === 'down') { startLvl = Math.max(1, startLvl - 1); beep(400, .03); }
+    else if (b === 'a' && !rep) startGame();
+  }
+  function input(b, down, rep) {
+    if (!down) { held[b] = false; return; }
+    held[b] = true;
+    if (b === 'start') { if (!rep) startPause(); return; }
+    if (b === 'reset') { if (!rep) toMenu(); return; }
+    if (b === 'sound') { if (!rep) toggleSound(); return; }
+    if (mode === 'menu') { menuKey(b, rep); return; }
+    if (mode === 'over') { if (b === 'a' && !rep) startGame(); return; }
+    if (mode === 'play') G.key(b, rep);
+  }
+
+  function drawMenu(now) {
+    text('BRICK GAME', 30, 15);
+    text(pad2(sel + 1), 88, 56);
+    text(GAMES[sel].name, 142, 22);
+    var rows = ICONS[GAMES[sel].id];
+    for (var r = 0; r < rows.length; r++) for (var c = 0; c < rows[r].length; c++) if (rows[r][c] === '#') lit(2 + c, 9 + r);
+    text('<  HRA  >', 312, 15);
+    text('RYCHLOST', 340, 13);
+    for (var i = 0; i < 9; i++) {
+      var x = 67 + i * 14;
+      ctx.strokeStyle = DARK; ctx.fillStyle = DARK; ctx.lineWidth = 2;
+      if (i < startLvl) ctx.fillRect(x, 352, 10, 10); else ctx.strokeRect(x + 1, 353, 8, 8);
+    }
+    if (Math.floor(now / 500) % 2 === 0) text('STISKNI START', 385, 15);
+  }
+  function drawOver(now) {
+    text('GAME', 100, 44); text('OVER', 150, 44);
+    text('SKÓRE ' + score, 215, 20);
+    if (newRec) text('NOVÝ REKORD!', 245, 16);
+    if (Math.floor(now / 500) % 2 === 0) text('STISKNI START', 300, 17);
+    text('RESET = MENU', 335, 13);
+  }
+
+  var cache = {};
+  function setText(el, key, val) { if (cache[key] !== val) { cache[key] = val; el.textContent = val; } }
+  function updatePanel() {
+    var g = G || GAMES[sel], inMenu = mode === 'menu';
+    setText(elSc, 'sc', inMenu ? '0' : String(score));
+    setText(elHi, 'hi', String(Math.max(HI[g.id] || 0, inMenu ? 0 : score)));
+    setText(elLv, 'lv', String(inMenu ? startLvl : level));
+    if (cache.hint !== g.id) { cache.hint = g.id; elHint.innerHTML = g.hint; }
+    setText(elA, 'a', inMenu ? 'START' : g.aLabel);
+    var ax = (inMenu || !G) ? null : G.aux();
+    var showAux = !!ax;
+    if (cache.auxShown !== showAux) { cache.auxShown = showAux; elAux.style.display = showAux ? 'flex' : 'none'; }
+    if (ax) { setText(elAuxL, 'auxL', ax.label); drawMini(ax.cells); }
+  }
+
+  function draw(now) {
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, COLS * 20, ROWS * 20);
+    var r, c;
+    for (r = 0; r < ROWS; r++) for (c = 0; c < COLS; c++) box(c, r, GHOST);
+    if (mode === 'menu') drawMenu(now);
+    else if (mode === 'play' || mode === 'pause') {
+      G.draw();
+      if (mode === 'pause') { plate(30, 170, 200, 60); text('PAUZA', 200, 34); }
+    }
+    else if (mode === 'crash') {
+      if (crashT < 700) { if (Math.floor(crashT / 110) % 2 === 0) G.draw(); }
+      else if (crashT < 1500) {
+        var n = Math.floor((crashT - 700) / 800 * ROWS) + 1;
+        for (r = ROWS - n; r < ROWS; r++) for (c = 0; c < COLS; c++) lit(c, r);
+      } else {
+        var m = Math.floor((crashT - 1500) / 800 * ROWS) + 1;
+        for (r = 0; r < ROWS - m; r++) for (c = 0; c < COLS; c++) lit(c, r);
+      }
+    }
+    else if (mode === 'over') drawOver(now);
+    updatePanel();
+  }
+
+  var last = performance.now();
+  function frame(now) {
+    var dt = Math.min(now - last, 100); last = now;
+    tAll += dt;
+    if (mode === 'play') G.update(dt);
+    else if (mode === 'crash') { crashT += dt; if (crashT > 2300) mode = 'over'; }
+    draw(now);
+    requestAnimationFrame(frame);
+  }
+
+  var KEYS = {
+    arrowleft: 'left', a: 'left', arrowright: 'right', d: 'right', arrowup: 'up', w: 'up', arrowdown: 'down', s: 'down',
+    ' ': 'a', z: 'a', x: 'a', k: 'a', enter: 'start', p: 'start', escape: 'reset', r: 'reset', m: 'sound'
+  };
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var b = KEYS[e.key.toLowerCase()];
+    if (!b) return;
+    e.preventDefault();
+    input(b, true, e.repeat);
+  });
+  document.addEventListener('keyup', function (e) {
+    var b = KEYS[e.key.toLowerCase()];
+    if (b) input(b, false);
+  });
+
+  function bind(el, name, rep) {
+    var timer = null, iv = null;
+    function stop() {
+      clearTimeout(timer); clearInterval(iv); timer = iv = null;
+      el.classList.remove('down'); input(name, false);
+    }
+    el.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      el.classList.add('down');
+      input(name, true, false);
+      if (rep) timer = setTimeout(function () { iv = setInterval(function () { input(name, true, true); }, 70); }, 200);
+    });
+    ['pointerup', 'pointercancel', 'mouseleave'].forEach(function (ev) {
+      el.addEventListener(ev, function () { if (el.classList.contains('down')) stop(); });
+    });
+  }
+  bind($('bL'), 'left', true);
+  bind($('bR'), 'right', true);
+  bind($('bUp'), 'up', true);
+  bind($('bDn'), 'down', true);
+  bind($('bA'), 'a', false);
+  bind($('bStart'), 'start', false);
+  bind($('bReset'), 'reset', false);
+  bind($('bSnd'), 'sound', false);
+
+  cv.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    if (mode === 'menu' || mode === 'over' || mode === 'pause') startPause();
+  });
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
